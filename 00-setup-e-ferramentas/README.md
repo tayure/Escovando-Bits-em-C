@@ -1,10 +1,6 @@
 # [00] O Ambiente Hostil: Terminal, Vim e GCC
 
-Quando você precisa acessar um servidor remoto para gerenciar uma intranet, cadastrar usuários ou subir regras em um firewall de rede, você não encontra uma interface gráfica bonitinha com um mouse à disposição. Você encontra uma tela preta piscando. 
-
-Aprender a programar dentro desse ambiente não é masoquismo, é treinamento de sobrevivência. Se você se acostuma a escrever e compilar código direto no ferro, você domina qualquer servidor. 
-
-Neste laboratório, nós não usamos botões de "Play". Nossa trindade de ferramentas é puramente baseada em linha de comando:
+Minha ideia inicial ao começar a programar e compilar C via terminal, nasceu de uma curiosidade de saber como cada "engrenagem" fuciona. Essa curiosidade nasceu ao jogar um jogo chamado "bandit", onde a fase 12 é sobre fazer um hex dump e em seguida ao assistir o vídeo "Qual a REAL diferença entre Arquivos Binário e Texto??" do Fabio Akita.
 
 ---
 
