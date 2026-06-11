@@ -48,3 +48,23 @@ A CPU não lê palavras como `movq`, ela responde a instruções binárias codif
 **d. Linker (Linking):**
 O arquivo `.o` gerado no passo anterior ainda não é um executável independente. O motivo? Ele sabe que você chamou a função `printf`, mas o código que ensina a CPU a cuspir caracteres na tela não está ali dentro. O Linker (ld) realiza o passo final que ocorre por padrão quando não passamos flags de interrupção ao GCC. Ele pega o seu "hello.o" e amarra as referências pendentes às bibliotecas dinâmicas do sistema operacional (como a "libc.so"), gerando o binário executável final `./hello`.
 
+## 3. Metodologia de Trabalho
+Para começar, como diz o Gustavo Guanabara "Vamos printar um 'hello world' na tela para livrar-se da maldição"
+
+**Edição:** 
+Criação e modificação do arquivo fonte diretamente no editor de terminal.
+```bash
+vim hello.c
+```
+Veja o código em:
+
+**Compilação:**
+Invocação manual do GCC, instruindo o compilador a processar o arquivo de texto e gerar um artefato binário (flag -o).
+```bash
+gcc hello.c -o meu_programa
+```
+**Execução:**
+Invocação direta do binário recém-compilado no diretório atual, delegando a execução ao kernel do Linux.
+```bash
+./meu_programa
+```
