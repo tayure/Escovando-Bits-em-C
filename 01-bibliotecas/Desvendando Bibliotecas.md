@@ -244,7 +244,7 @@ Como funciona na prática:
 2. Segunda vez: ```_STDIO_H``` já está definido → ```#ifndef _STDIO_H``` é falso → todo o conteúdo é descartado pelo pré-processador.
 
 Alternativa moderna (```C11/C++11```): ```#pragma once``` — mesma função, implementação dependente do compilador.
-## O que o .i NÃO Contém
+## O que o `.i` NÃO Contém
 Apesar de todas essas assinaturas de ```printf```, ```scanf```, ```fopen```, ```fclose```, etc. estarem agora visíveis para o compilador, o código binário de como o ```printf``` escreve bytes no file descriptor 1 (stdout) ainda não está lá. O ```main.i``` é 100% texto. Ele contém:
 * Protótipos de funções (declarações)
 * ```struct``` e ```typedef```
@@ -253,9 +253,7 @@ Apesar de todas essas assinaturas de ```printf```, ```scanf```, ```fopen```, ```
 
 O algoritmo do `printf` — a lógica que formata a string, gerencia o buffer interno do `FILE`, e chama `write(1, buf, len)` — está compilado em `libc.so.6` (ou `libc.a`), em outro lugar do sistema de arquivos. O pré-processador não tem como "ver" esse código. Ele só injeta o manual de instruções.
 
-É aí que entra a próxima engrenagem: o compilador (`cc1`) pega esse texto, valida tipos, e gera código de máquina parcial com símbolos `U` (undefined) para tudo que foi declarado mas não definido.
-
-Veja como funciona:
+Veja de forma "ilustrativa" como funciona:
 | Etapa   | Input | Output | O que faz |
 |---------|-------|--------|-----------|
 | `cpp` (`gcc -E`) | `main.c` | `main.i` | Substitui `#include` por texto, expande macros, remove blocos condicionais falsos |
@@ -264,3 +262,4 @@ Veja como funciona:
 | `ld` | `main.o` + `libc` | `main` | Resolve símbolos `U` → endereços finais |
 
 O pré-processador é a primeira engrenagem: ele transforma seu arquivo de 10 linhas em um monstro de 1000+ linhas de texto puro, sem nenhuma instrução de máquina. A partir daqui, o compilador assume.
+O compilador (`cc1`) pega esse texto, valida tipos, e gera código de máquina parcial com símbolos `U` (undefined) para tudo que foi declarado mas não definido.
