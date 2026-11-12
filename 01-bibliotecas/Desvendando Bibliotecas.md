@@ -392,23 +392,139 @@ Se outros programas estiverem rodando, todos compartilham a exata mesma instânc
 | Início (startup) | Mais rápido | Ligeiramente mais lento (resolução) |
 | Uso típico | Firmware embarcado, containers | Aplicações desktop/servidor |
 
-###  Ferramentas Práticas para Inspecionar
+Agora que você sabe o que cada etapa faz, irei mostra como inspecionar cada uma delas com as ferramentas do próprio sistema.
+
+## Investigando o Motor com as Próprias Mãos
+Teoria sem verificação é superstição. Você já entendeu o pipeline, o papel do pré-processador, o que o linker faz e como o `ld.so` resolve endereços em runtime. Agora é a hora de "abrir a capô" e ver com os próprios olhos. Cada comando abaixo é uma lente diferente para inspecionar a mesma engrenagem que você acabou de desmontar.
+
+### Inspecionando as dependências dinâmicas de um binário
+
+```$ ldd ./main   ```
+
+Isso mostra exatamente quais bibliotecas `.so` o carregador dinâmico precisa puxar para o seu programa rodar. A saída típica de um programa C simples:
+
 ```
-# Ver símbolos (tabela estática):
-$ nm main.o
-
-# Ver símbolos dinâmicos (tabela .dynsym):
-$ nm -D main
-
-# Ver dependências de bibliotecas:
-$ ldd main
-
-# Ver seções do ELF:
-$ readelf -S main
-
-# Ver a seção dinâmica (DT_NEEDED, etc.):
-$ readelf -d main
-
-# Ver o código assembly gerado:
-$ objdump -d main   
+    linux-vdso.so.1 (0x00007ffd5a3c6000)
+    libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f2e1a4b0000)
+    libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f2e1a2c0000)
+    /lib64/ld-linux-x86-64.so.2 (0x00007f2e1a6d0000)   
 ```
+Cada linha carrega informação densa. Vamos desmontar:
+
+* `linux-vdso.so.1` — Não é um arquivo em disco. É uma "biblioteca virtual" que o kernel injeta diretamente na memória do processo ao criar o `mmap`. Ela permite que chamadas como `gettimeofday()` e `clock_gettime()` sejam resolvidas sem trapear para o kernel (o que seria mais caro). O endereço entre parênteses é onde ela foi mapeada.
+* `=>` — O símbolo de seta indica que o "soname" registrado no ELF foi resolvido para um caminho físico real. O nome `libc.so.6` é o que o linker gravou como dependência; o caminho `/lib/x86_64-linux-gnu/libc.so.6` é onde o `ld.so` a encontrou no disco.
+* `(0x00007f2e1a2c0000)` — O endereço base de mapeamento em memória virtual. Diferentes processos terão endereços diferentes (devido ao ASLR — Address Space Layout Randomization), mas o conteúdo mapeado é o mesmo arquivo.
+* `/lib64/ld-linux-x86-64.so.2` — O próprio dynamic loader. Ele aparece sem `=>` porque é ele quem faz o mapeamento; não é uma dependência "resolvida" — é o executor da resolução.
+
+Onde o `ld.so` procura? A ordem de busca é:
+
+1- A variável de ambiente `LD_LIBRARY_PATH` (útil para testes, mas perigosa em produção — pode ser manipulada para carregar bibliotecas maliciosas).
+
+2- Os campos `RPATH`/`RUNPATH` embutidos no próprio binário ELF (definidos no linker com `-Wl,-rpath,/caminho`).
+
+3- O cache binário em `/etc/ld.so.cache` (construído pelo `ldconfig` a partir de `/etc/ld.so.conf` e `/etc/ld.so.conf.d/`).
+
+4- Os diretórios padrão: `/lib` e `/usr/lib`.
+
+Se você quiser ver também as dependências transitivas (as bibliotecas das bibliotecas) e os símbolos específicos que cada uma resolve, use:
+
+```$ ldd -v ./main   ```
+
+Isso expande a saída para listar, para cada `.so`, quais símbolos exatos o programa puxa dela, essencial quando você está depurando um `undefined symbol` em runtime.
+
+### Listando símbolos exportados por uma biblioteca compartilhada
+
+`$ nm -D /lib/x86_64-linux-gnu/libc.so.6 | grep ' T '   `
+
+O flag `-D` (ou `--dynamic`) instrui o nm a ler a tabela dinâmica de símbolos (`.dynsym`) em vez da tabela completa (`.symtab`). A tabela completa só existe em binários não-stripados; a dinâmica é o que o `ld.so` usa em runtime para resolver chamadas.
+
+O `grep ' T '` filtra apenas funções definidas em código (seção `.text`). Mas o nm -D exibe outros tipos que valem a pena conhecer:
+| Letra | Significado | Exemplo |
+|-------|-------------|---------|
+| `T` | Função definida (código na seção `.text`) | `printf`, `malloc` |
+| `t` | Função local (não exportada, visível só dentro da `.so`) | funções `static` |
+| `D` | Dado definido (variável global inicializada) | `stdin`, `stdout` |
+| `B` | Dado em BSS (variável global não inicializada) | `errno` |
+| `U` | Símbolo indefinido (a `.so` depende dele) | `__stack_chk_fail` |
+| `W` | Símbolo fraco (weak) | `memcpy` (pode ser sobrescrito) |
+
+Uma varredura mais útil para entender o "contrato" que a glibc expõe:
+
+`$ nm -D /lib/x86_64-linux-gnu/libc.so.6 | grep ' T ' | wc -l   `
+
+Isso te dá a contagem de funções exportadas (geralmente na casa dos milhares). Compare com o que o header `stdio.h` declara, você verá que a biblioteca expõe muito mais do que qualquer header de uso comum declara. O header é o catálogo de preços; a `.so` é o estoque inteiro do armazém.
+
+### Inspecionando a seção dinâmica do ELF diretamente
+
+O `ldd` é um script shell que, por baixo, executa:
+
+`LD_TRACE_LOADED_OBJECTS=1 /lib64/ld-linux-x86-64.so.2 ./main   `
+
+Ou seja, ele executa o dynamic loader com uma variável de ambiente que o faz apenas imprimir as resoluções e sair. Se você quiser ver a seção dinâmica crua gravada no binário (sem executar nada), use:
+
+`$ readelf -d ./main   `
+
+A saída mostra campos como:
+
+```
+Dynamic section at offset 0x2dd8 contains 27 entries:
+  Tag        Type                         Name/Value
+ 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+ 0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]
+ 0x0000000000000019 (INIT)               0x1000
+ 0x0000000000000017 (FINI)               0x12a4
+ 0x0000000000000006 (SYMTAB)             0x3f0
+ 0x0000000000000007 (STRTAB)             0x1a0
+ 0x0000000000000008 (SYMENT)             24 (bytes)
+ 0x000000000000001e (FLAGS)              BIND_NOW
+ 0x000000000000001f (RPATH)              Library rpath: [/opt/minha_lib/lib]   
+```
+
+Cada entrada `NEEDED` é exatamente o "metadado" que o linker gravou durante a compilação (o que a seção de bibliotecas compartilhadas descreveu). O `SYMTAB` e `STRTAB` apontam para as tabelas de símbolos que o `ld.so` vai varrer para resolver endereços.
+
+### Verificando se um binário é estaticamente ou dinamicamente ligado
+
+`$ file ./main   `
+
+* Dinâmico: `ELF 64-bit LSB pie executable, x86-64, ... dynamically linked, ...`
+* Estático: `ELF 64-bit LSB executable, x86-64, ... statically linked, ...`
+
+Se o binário for estático, o `ldd` retornará `not a dynamic executable` — porque não há seção `.dynamic` para o loader ler. Todo o código da glibc já está fundido no arquivo.
+
+### Observando o carregamento em runtime
+
+Se você quer ver ao vivo o que o `ld.so` está fazendo no momento em que o processo nasce:
+
+`$ LD_DEBUG=files ./main   `
+
+O `ld.so` emitirá no `stderr` cada arquivo que tenta abrir, cada cache que consulta, e cada mapeamento que faz. É o "modo verbose" do dynamic loader.
+
+Para rastrear as chamadas de sistema que o processo faz (incluindo os `mmap` que carregam as `.so`):
+
+`$ strace -e trace=mmap,openat ./main `  
+
+Você verá os `openat("/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC)` e os `mmap(...)` que colocam o arquivo na memória.
+
+### Verificando o cache do sistema
+
+Para ver todas as bibliotecas compartilhadas que o `ld.so` conhece (o conteúdo do `/etc/ld.so.cache`):
+
+`$ ldconfig -p | grep libc   `
+
+Saída típica:
+
+`libc.so.6 (libc6,x86-64) => /lib/x86_64-linux-gnu/libc.so.6   `
+
+Se você instalou uma biblioteca customizada e o `ldd` não a encontra, a causa quase sempre é: o diretório não está no cache. A correção é adicionar o caminho a `/etc/ld.so.conf.d/minha_lib.conf` e rodar `sudo ldconfig`.
+
+### O que tudo isso significa na prática
+
+Você agora tem a cadeia completa de auditoria:
+
+| Comando | Pergunta que responde |
+|---------|----------------------|
+| `file` | "Este binário é dinâmico ou estático?" |
+| `ldd` | "Quais `.so` ele precisa e onde estão?" |
+| `readelf -d` | "O que está gravado no ELF (a 'receita' que o `ld.so` segue)?" |
+| `nm -D` | "Quais símbolos a `.so` exporta (o 'cardápio' de funções)?" |
+| `LD_DEBUG` / `strace` | "O que o `ld.so` está fazendo em runtime, passo a passo?" |
